@@ -23,12 +23,12 @@ from collections import defaultdict
 from urllib.parse import urlparse
 from lxml import html
 from socket import timeout as timeout_error
-#import pdb
 
 # for media upload
 import mimetypes
 from requests_toolbelt.multipart.encoder import MultipartEncoder
 
+from bot import Bot
 
 def catchKeyboardInterrupt(fn):
     def wrapper(*args):
@@ -126,7 +126,7 @@ class WebWeixin(object):
         opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self.cookie))
         opener.addheaders = [('User-agent', self.user_agent)]
         urllib.request.install_opener(opener)
-        self.bot = self._simsimi
+        self.bot = Bot(self)
 
     def loadConfig(self, config):
         if config['DEBUG']:
@@ -583,6 +583,9 @@ class WebWeixin(object):
             logging.debug(json.dumps(dic, indent=4))
         return dic['BaseResponse']['Ret'] == 0
 
+    def saveFile(self, filename, data, api=None):
+        return self._saveFile(filename, data, api)
+
     def _saveFile(self, filename, data, api=None):
         fn = filename
         if self.saveSubFolders[api]:
@@ -724,7 +727,7 @@ class WebWeixin(object):
                 if data == '':
                     return
                 data.decode('gbk').encode('utf-8')
-                pos = self._searchContent('title', data, 'xml')
+                pos = self.bot.searchContent('title', data, 'xml')
                 temp = self._get(content)
                 if temp == '':
                     return
@@ -795,13 +798,7 @@ class WebWeixin(object):
                 raw_msg = {'raw_msg': msg}
                 self._showMsg(raw_msg)
                 if self.autoReplyMode:
-                    self.bot(content, name)
-                    # if self.webwxsendmsg(ans, msg['FromUserName']):
-                    #     print('自动回复: ' + ans)
-                    #     logging.info('自动回复: ' + ans)
-                    # else:
-                    #     print('自动回复失败')
-                    #     logging.info('自动回复失败')
+                    self.bot.ask(name, content)
             elif msgType == 3:
                 image = self.webwxgetmsgimg(msgid)
                 raw_msg = {'raw_msg': msg,
@@ -827,7 +824,7 @@ class WebWeixin(object):
                     name.strip(), json.dumps(info))}
                 self._showMsg(raw_msg)
             elif msgType == 47:
-                url = self._searchContent('cdnurl', content)
+                url = self.bot.searchContent('cdnurl', content)
                 raw_msg = {'raw_msg': msg,
                            'message': '%s 发了一个动画表情，点击下面链接查看: %s' % (name, url)}
                 self._showMsg(raw_msg)
@@ -838,15 +835,15 @@ class WebWeixin(object):
                 print('%s 分享了一个%s:' % (name, appMsgType[msg['AppMsgType']]))
                 print('=========================')
                 print('= 标题: %s' % msg['FileName'])
-                print('= 描述: %s' % self._searchContent('des', content, 'xml'))
+                print('= 描述: %s' % self.bot.searchContent('des', content, 'xml'))
                 print('= 链接: %s' % msg['Url'])
-                print('= 来自: %s' % self._searchContent('appname', content, 'xml'))
+                print('= 来自: %s' % self.bot.searchContent('appname', content, 'xml'))
                 print('=========================')
                 card = {
                     'title': msg['FileName'],
-                    'description': self._searchContent('des', content, 'xml'),
+                    'description': self.bot.searchContent('des', content, 'xml'),
                     'url': msg['Url'],
-                    'appname': self._searchContent('appname', content, 'xml')
+                    'appname': self.bot.searchContent('appname', content, 'xml')
                 }
                 raw_msg = {'raw_msg': msg, 'message': '%s 分享了一个%s: %s' % (
                     name, appMsgType[msg['AppMsgType']], json.dumps(card))}
@@ -912,6 +909,7 @@ class WebWeixin(object):
 
     def sendMsg(self, name, word, isfile=False):
         id = self.getUSerID(name)
+        ret = False
         if id:
             if isfile:
                 with open(word, 'r') as f:
@@ -920,6 +918,7 @@ class WebWeixin(object):
                         self._echo('-> ' + name + ': ' + line)
                         if self.webwxsendmsg(line, id):
                             print(' [成功]')
+                            ret = True
                         else:
                             print(' [失败]')
                         time.sleep(1)
@@ -927,12 +926,14 @@ class WebWeixin(object):
                 if self.webwxsendmsg(word, id):
                     print('[*] 消息发送成功')
                     logging.debug('[*] 消息发送成功')
+                    ret = True
                 else:
                     print('[*] 消息发送失败')
                     logging.debug('[*] 消息发送失败')
         else:
             print('[*] 此用户不存在')
             logging.debug('[*] 此用户不存在')
+        return ret
 
     def sendMsgToAll(self, word):
         for contact in self.ContactList:
@@ -952,7 +953,7 @@ class WebWeixin(object):
         if response is not None:
             media_id = response['MediaId']
         user_id = self.getUSerID(name)
-        response = self.webwxsendmsgimg(user_id, media_id)
+        return self.webwxsendmsgimg(user_id, media_id)
 
     def sendEmotion(self, name, file_name):
         response = self.webwxuploadmedia(file_name)
@@ -960,7 +961,7 @@ class WebWeixin(object):
         if response is not None:
             media_id = response['MediaId']
         user_id = self.getUSerID(name)
-        response = self.webwxsendmsgemotion(user_id, media_id)
+        return self.webwxsendmsgemotion(user_id, media_id)
 
     @catchKeyboardInterrupt
     def start(self):
@@ -1150,123 +1151,3 @@ class WebWeixin(object):
             logging.error('generic exception: ' + traceback.format_exc())
 
         return ''
-
-    def _tuling123(self, word, name):
-        def _getImage(url, id):
-            data = requests.get(url).content
-            if data == '':
-                return ''
-            fn = 'img_tl_' + id + '.jpg'
-            return self._saveFile(fn, data, 'webwxgetmsgimg')
-
-        url = 'http://openapi.tuling123.com/openapi/api/v2'
-        params = {
-            "reqType": 0,
-            "perception": {
-                "inputText": {
-                    "text": word
-                },
-                "inputImage": {
-                    "url": ""
-                }
-            },
-            "userInfo": {
-                "apiKey": "8223d32db18541d4a99a34842a830fed",
-                "userId": "132779"
-            }
-        }
-        r = requests.post(url, json=params)
-        res = r.json()
-        content = ''
-        images = []
-        if res['results']:
-            arr = res['results']
-            for dic in arr:
-                if (dic['resultType'] == 'image'):
-                    images.append((dic['values']['silentState'], dic['values']['image']))
-                else:
-                    content += ','.join(dic['values'].values())
-        else:
-            content = '让我一个人静静 T_T...'
-
-        for x in images:
-            image = _getImage(x[1], x[0])
-            print('自动回复: ' + x[1])
-            self.sendImg(name, image)
-
-        print('自动回复: ' + content)
-        self.sendMsg(name, content)
-
-    def _qingyunke(self, word):
-        url = 'http://api.qingyunke.com/api.php?key=free&appid=0&msg=%s' % word
-        r = requests.get(url)
-        res = r.json()
-        if res['result'] == 0:
-            return res['content']
-        else:
-            return '让我一个人静静 T_T...'
-
-    def _xiaodoubi(self, word):
-        url = 'http://www.xiaodoubi.com/bot/chat.php'
-        try:
-            r = requests.post(url, data={'chat': word})
-            return str(r.content)
-        except:
-            return "让我一个人静静 T_T..."
-
-    def _simsimi(self, word, name):
-        key = 'fa358fa1-4c58-48f3-9c7b-09c265668fcc'
-        url = 'http://sandbox.api.simsimi.com/request.p?key=%s&lc=ch&ft=0.0&text=%s' % (
-            key, word)
-        r = requests.get(url)
-        ans = r.json()
-        content = '你在说什么，风太大听不清列'
-        if ans['result'] == 100:
-            content = ans['response']
-        print('自动回复: ' + content)
-        self.sendMsg(name, content)
-
-    def _searchContent(self, key, content, fmat='attr'):
-        if fmat == 'attr':
-            pm = re.search(key + '\s?=\s?"([^"<]+)"', content)
-            if pm:
-                return pm.group(1)
-        elif fmat == 'xml':
-            pm = re.search('<{0}>([^<]+)</{0}>'.format(key), content)
-            if not pm:
-                pm = re.search(
-                    '<{0}><\!\[CDATA\[(.*?)\]\]></{0}>'.format(key), content)
-            if pm:
-                return pm.group(1)
-        return '未知'
-
-
-class UnicodeStreamFilter:
-
-    def __init__(self, target):
-        self.target = target
-        self.encoding = 'utf-8'
-        self.errors = 'replace'
-        self.encode_to = self.target.encoding
-
-    def write(self, s):
-        if type(s) == str:
-            s = s.encode().decode('utf-8')
-        s = s.encode(self.encode_to, self.errors).decode(self.encode_to)
-        self.target.write(s)
-
-    def flush(self):
-        self.target.flush()
-
-if sys.stdout.encoding == 'cp936':
-    sys.stdout = UnicodeStreamFilter(sys.stdout)
-
-
-if __name__ == '__main__':
-    # logger = logging.getLogger(__name__)
-    # if not sys.platform.startswith('win'):
-    #     import coloredlogs
-    #     coloredlogs.install(level='DEBUG')
-
-    webwx = WebWeixin()
-    webwx.start()
