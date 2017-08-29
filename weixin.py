@@ -126,7 +126,7 @@ class WebWeixin(object):
         opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self.cookie))
         opener.addheaders = [('User-agent', self.user_agent)]
         urllib.request.install_opener(opener)
-        self.bot = self._simsimi
+        self.bot = self._tuling123
 
     def loadConfig(self, config):
         if config['DEBUG']:
